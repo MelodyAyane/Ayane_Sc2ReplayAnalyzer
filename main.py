@@ -26,6 +26,13 @@ def open_url(player_name):
 
 def analyze_replay():
     root = tk.Tk()  # Create a standard Tk instance
+
+    def close_window():
+        root.quit()
+        root.destroy()
+        os._exit(0)  # Forcefully exit the program
+
+    root.protocol("WM_DELETE_WINDOW", close_window)  # Close the window when the close button is pressed
     style = ttkbootstrap.Style(theme="flatly")  # Apply a ttkbootstrap style
 
     root.overrideredirect(True)  # Hide the title bar
@@ -94,15 +101,41 @@ def analyze_replay():
     # Print build order
     text_widgets['Build Order'].tag_configure("bold_large", font=('Microsoft YaHei', 14, 'bold'))
     for player in replay.players:
-        text_widgets['Build Order'].insert(tk.END, f"Player {player.name}'s build order:\n", "bold_large")
+        build_order = {}  # A dictionary to store the build order for each time point
+        current_supply = 0  # Variable to store the current supply count
         for event in replay.events:
-            if isinstance(event,
-                          sc2reader.events.tracker.UnitBornEvent) and event.control_pid == player.pid and event.second != 0:
-                text_widgets['Build Order'].insert(tk.END, f"At {event.second}s: {event.unit_type_name} was built\n")
+            if isinstance(event, sc2reader.events.tracker.PlayerStatsEvent) and event.pid == player.pid:
+                current_supply = event.food_used  # Update the current supply count
+            elif isinstance(event,
+                            sc2reader.events.tracker.UnitBornEvent) and event.control_pid == player.pid and event.second != 0:
+                if event.second not in build_order:
+                    build_order[event.second] = {"population": current_supply, "units": [], "buildings": [],
+                                                 "upgrades": []}
+                build_order[event.second]["units"].append(event.unit_type_name)
             elif isinstance(event,
                             sc2reader.events.tracker.UpgradeCompleteEvent) and event.pid == player.pid and event.second != 0:
-                text_widgets['Build Order'].insert(tk.END,
-                                                   f"At {event.second}s: {event.upgrade_type_name} was completed\n")
+                if event.second not in build_order:
+                    build_order[event.second] = {"population": current_supply, "units": [], "buildings": [],
+                                                 "upgrades": []}
+                build_order[event.second]["upgrades"].append(event.upgrade_type_name)
+            elif isinstance(event,
+                            sc2reader.events.tracker.UnitInitEvent) and event.control_pid == player.pid and event.second != 0:
+                if event.second not in build_order:
+                    build_order[event.second] = {"population": current_supply, "units": [], "buildings": [],
+                                                 "upgrades": []}
+                build_order[event.second]["buildings"].append(event.unit_type_name)
+
+        # Print the build order
+        text_widgets['Build Order'].insert(tk.END, f"Player {player.name}'s build order:\n", "bold_large")
+        for second in sorted(build_order.keys()):
+            text_widgets['Build Order'].insert(tk.END,
+                                               f"At {second}s (Population: {build_order[second]['population']}):\n")
+            for unit in build_order[second]["units"]:
+                text_widgets['Build Order'].insert(tk.END, f"    {unit} was built\n")
+            for building in build_order[second]["buildings"]:
+                text_widgets['Build Order'].insert(tk.END, f"    {building} was built\n")
+            for upgrade in build_order[second]["upgrades"]:
+                text_widgets['Build Order'].insert(tk.END, f"    {upgrade} was completed\n")
         text_widgets['Build Order'].insert(tk.END, "\n")  # Add an empty line after each player's build order
 
     # Print game timeline
@@ -121,12 +154,14 @@ def analyze_replay():
                 vespene_collected += event.vespene_collection_rate
         print(f"Player {player.name} collected {minerals_collected} minerals and {vespene_collected} vespene")
 
+    # Print chat messages
     sys.stdout = TextRedirector(text_widgets['Chat Messages'])
     if replay.messages:
         for message in replay.messages:
-            print(message)
+            print(f"{message.player.name}: {message.text}")
     else:
         print("No chat messages in this replay.")
+
     # Print metadata
     sys.stdout = TextRedirector(text_widgets['Basic Info'])
     print(f"Replay created at: {replay.date}")
