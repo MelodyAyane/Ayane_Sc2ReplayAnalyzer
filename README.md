@@ -1,6 +1,6 @@
 # Ayane_Sc2ReplayAnalyzer
 
-Ayane_Sc2ReplayAnalyzer is a Python application that analyzes StarCraft II replay files. It provides detailed information about the game, including basic information, player information, build order, game timeline, game statistics, chat messages, and metadata.
+Ayane_Sc2ReplayAnalyzer is a Python application that analyzes StarCraft II replay files. It provides detailed information about the game, including basic information, player information, build order, game timeline, game statistics, chat messages, and macro analysis.
 
 ## Features
 
