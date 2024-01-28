@@ -30,6 +30,13 @@ def open_url(player_name):
 
 def handle_event(event, build_order, current_supply, player):
     """Handles a single event from the replay."""
+
+    if isinstance(event, sc2reader.events.tracker.UnitBornEvent) and event.control_pid == player.pid:
+        if event.second not in build_order:  # Check if this second is already in the build order
+            build_order[event.second] = {"population": 0, "units": defaultdict(int), "buildings": [],
+                                         "upgrades": []}  # If not, initialize it
+        build_order[event.second]["units"][event.unit_type_name] += 1
+
     if isinstance(event, sc2reader.events.tracker.PlayerStatsEvent) and event.pid == player.pid:
         current_supply = event.food_used  # Update the current supply count
 
@@ -52,31 +59,25 @@ def handle_event(event, build_order, current_supply, player):
 def print_build_order(text_widgets, replay, player, build_order):
     """Prints the build order for a single player."""
     text_widgets['Build Order'].tag_configure("bold_large", font=('Microsoft YaHei', 14, 'bold'))
-    text_widgets['Build Order'].insert(tk.END, f"Player {player.name}'s build order:\n", "bold_large")
+    # Use player.name to get the player's name
+    player_name = player.name
+    text_widgets['Build Order'].insert(tk.END, f"\nPlayer ", "bold_large")
+    text_widgets['Build Order'].insert(tk.END, f"{player_name}'s build order:\n", "bold_large")
     for second in sorted(build_order.keys()):
         if second == 0:  # Skip the 0 second time point
             continue
         if second == min(build_order.keys()):  # Special case for the first time point
-            text_widgets['Build Order'].insert(tk.END,
-                                               f"At {second}s (Population: {build_order[second]['population']}):\n")
-        elif build_order[second]["upgrades"] or build_order[second][
-            "buildings"]:  # Only print the population count if there are upgrades or buildings
-            text_widgets['Build Order'].insert(tk.END,
-                                               f"At {second}s (Population: {build_order[second]['population']}):\n")
-        unit_counts = defaultdict(int)
+            text_widgets['Build Order'].insert(tk.END, f"At {second}s (Population: {build_order[second]['population']}):\n")
+        elif build_order[second]["upgrades"] or build_order[second]["buildings"]:  # Only print the population count if there are upgrades or buildings
+            text_widgets['Build Order'].insert(tk.END, f"At {second}s (Population: {build_order[second]['population']}):\n")
         for unit, count in build_order[second]["units"].items():
-            unit_counts[unit] += count
-        for unit, count in unit_counts.items():
-            if unit != 'Interceptor':  # Skip printing if the unit is 'Interceptor'
-                if count > 1:
-                    text_widgets['Build Order'].insert(tk.END, f"    {unit} *{count} was built\n")
-                else:
-                    text_widgets['Build Order'].insert(tk.END, f"    {unit} was built\n")
+            if unit not in ['Interceptor', 'Larva', 'Broodling']:  # Skip printing if the unit is 'Interceptor', 'Larva' or 'Broodling'
+                text_widgets['Build Order'].insert(tk.END, f"    {unit} *{count} was built\n")
         for building in build_order[second]["buildings"]:
             text_widgets['Build Order'].insert(tk.END, f"    {building} was built\n")
         for upgrade in build_order[second]["upgrades"]:
             text_widgets['Build Order'].insert(tk.END, f"    {upgrade} was completed\n")
-        text_widgets['Build Order'].insert(tk.END, "\n")  # Add an empty line after each player's build order
+    text_widgets['Build Order'].insert(tk.END, "\n")  # Add an empty line after each player's build order
 
 def analyze_replay():
     """Analyzes a StarCraft II replay."""
@@ -140,6 +141,54 @@ def analyze_replay():
 
     # Print game version and map information
     print(f"Game version: {replay.release_string}")
+
+    # Print player info
+    sys.stdout = TextRedirector(text_widgets['Player Info'])
+    players_info = []
+    button_frame = tk.Frame(text_widgets['Player Info'])  # Create a new frame to contain the buttons
+    button_frame.pack(side=tk.BOTTOM)  # Place the frame at the bottom of the window
+    # Create a set to store the names of players that have been processed
+    processed_players = set()
+
+    for player in replay.players:
+        # Skip this player if their information has already been added
+        if player.name in processed_players:
+            continue
+
+        player_stats = {'apm': None, 'epm': None}  # Initialize player stats
+        build_order = defaultdict(lambda: {"population": 0, "units": defaultdict(int), "buildings": [],
+                                           "upgrades": []})  # A dictionary to store the build order for each time point
+        current_supply = 0  # Variable to store the current supply count
+        action_count = 0
+        effective_action_count = 0
+        last_action = None
+        for event in replay.events:
+            if isinstance(event, sc2reader.events.game.CommandEvent) and event.player == player:
+                action_count += 1
+                if last_action != event.ability_name:
+                    effective_action_count += 1
+                last_action = event.ability_name
+
+        game_length_minutes = replay.game_length.seconds / 60
+        player_stats['apm'] = int(action_count / game_length_minutes)
+        player_stats['epm'] = int(effective_action_count / game_length_minutes)  # Only count distinct actions
+
+        players_info.append(
+            f"\nPlayer name: {player.name}\nPlayer race: {player.play_race}\nPlayer color: {player.color}\nAverage APM: {player_stats['apm']}\nAverage EPM: {player_stats['epm']}")  # Add player color and info
+
+        # Add this player's name to the set of processed players
+        processed_players.add(player.name)
+
+    players_info_str = '\n'.join(players_info)  # Convert the list to a string
+
+    # Print the player info
+    sys.stdout = TextRedirector(text_widgets['Player Info'])
+    text_widgets['Player Info'].tag_configure("bold_large", font=('Microsoft YaHei', 14, 'bold'))
+    text_widgets['Player Info'].delete('1.0', tk.END)  # Clear the text widget before inserting new text
+    text_widgets['Player Info'].insert(tk.END, players_info_str, "bold_large")
+    # Add an entry for the 0 second time point
+    build_order[0]["units"]['SCV'] += 1
+    build_order[0]["population"] = 1
 
     # Create a build_order dictionary for each player
     build_orders = {player: defaultdict(lambda: {"population": 0, "units": defaultdict(int), "buildings": [], "upgrades": []}) for player in replay.players}
