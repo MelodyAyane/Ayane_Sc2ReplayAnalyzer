@@ -31,7 +31,8 @@ def handle_event(event, build_order, current_supply, player):
     """Handles a single event from the replay."""
     if isinstance(event, sc2reader.events.tracker.PlayerStatsEvent) and event.pid == player.pid:
         current_supply = event.food_used  # Update the current supply count
-    elif isinstance(event, sc2reader.events.tracker.UnitBornEvent) and event.control_pid == player.pid:
+
+    if isinstance(event, sc2reader.events.tracker.UnitBornEvent) and event.control_pid == player.pid:
         if event.second not in build_order:  # Check if this second is already in the build order
             build_order[event.second] = {"population": 0, "units": [], "buildings": [], "upgrades": []}  # If not, initialize it
         if event.second == 0:  # If this is the 0 second time point
@@ -69,8 +70,15 @@ def print_build_order(text_widgets, replay, player, build_order):
             "buildings"]:  # Only print the population count if there are upgrades or buildings
             text_widgets['Build Order'].insert(tk.END,
                                                f"At {second}s (Population: {build_order[second]['population']}):\n")
+        unit_counts = defaultdict(int)
         for unit in build_order[second]["units"]:
-            text_widgets['Build Order'].insert(tk.END, f"    {unit} was built\n")
+            unit_counts[unit] += 1
+        for unit, count in unit_counts.items():
+            if unit != 'Interceptor':  # Skip printing if the unit is 'Interceptor'
+                if count > 1:
+                    text_widgets['Build Order'].insert(tk.END, f"    {unit} *{count} was built\n")
+                else:
+                    text_widgets['Build Order'].insert(tk.END, f"    {unit} was built\n")
         for building in build_order[second]["buildings"]:
             text_widgets['Build Order'].insert(tk.END, f"    {building} was built\n")
         for upgrade in build_order[second]["upgrades"]:
@@ -133,35 +141,60 @@ def analyze_replay():
 
     # Print game version and map information
     print(f"Game version: {replay.release_string}")
-
+    # Print player info
     sys.stdout = TextRedirector(text_widgets['Player Info'])
     players_info = []
     button_frame = tk.Frame(text_widgets['Player Info'])  # Create a new frame to contain the buttons
     button_frame.pack(side=tk.BOTTOM)  # Place the frame at the bottom of the window
-    for player in replay.players:
-        players_info.append(
-            f"Player name: {player.name}\nPlayer race: {player.play_race}\nPlayer color: {player.color}")  # Add player color and info
-        info_button = tk.Button(button_frame, text=player.name,  # Add the button to the frame
-                                command=lambda player_name=player.name: open_url(player_name))
-        info_button.pack(side=tk.LEFT,
-                         padx=10)  # Place the button to the left of the previous button with a horizontal padding of 10 pixels
-    players_info = '\n'.join(players_info)
-    print(f"Players:\n{players_info}")
+    # Create a set to store the names of players that have been processed
+    processed_players = set()
 
-    # Print build order
     for player in replay.players:
-        build_order = defaultdict(lambda: {"population": 0, "units": [], "buildings": [], "upgrades": []})  # A dictionary to store the build order for each time point
+        # Skip this player if their information has already been added
+        if player.name in processed_players:
+            continue
+
+        player_stats = {'apm': None, 'epm': None}  # Initialize player stats
+        build_order = defaultdict(lambda: {"population": 0, "units": [], "buildings": [],
+                                           "upgrades": []})  # A dictionary to store the build order for each time point
         current_supply = 0  # Variable to store the current supply count
-
-        # Add an entry for the 0 second time point
-        build_order[0]["units"].append('SCV')
-        build_order[0]["population"] = 1
-
+        action_count = 0
+        effective_action_count = 0
+        last_action = None
         for event in replay.events:
-            build_order, current_supply = handle_event(event, build_order, current_supply, player)
+            if isinstance(event, sc2reader.events.game.CommandEvent) and event.player == player:
+                action_count += 1
+                if last_action != event.ability_name:
+                    effective_action_count += 1
+                last_action = event.ability_name
 
-        print_build_order(text_widgets, replay, player, build_order)
+        game_length_minutes = replay.game_length.seconds / 60
+        player_stats['apm'] = action_count / game_length_minutes
+        player_stats['epm'] = effective_action_count / game_length_minutes  # Only count distinct actions
 
+        players_info.append(
+            f"\nPlayer name: {player.name}\nPlayer race: {player.play_race}\nPlayer color: {player.color}\nAverage APM: {player_stats['apm']}\nAverage EPM: {player_stats['epm']}")  # Add player color and info
+
+        # Add this player's name to the set of processed players
+        processed_players.add(player.name)
+
+    players_info_str = '\n'.join(players_info)  # Convert the list to a string
+
+    # Print the player info
+    sys.stdout = TextRedirector(text_widgets['Player Info'])
+    text_widgets['Player Info'].tag_configure("bold_large", font=('Microsoft YaHei', 14, 'bold'))
+    text_widgets['Player Info'].delete('1.0', tk.END)  # Clear the text widget before inserting new text
+    text_widgets['Player Info'].insert(tk.END, players_info_str, "bold_large")
+    # Add an entry for the 0 second time point
+    build_order[0]["units"].append('SCV')
+    build_order[0]["population"] = 1
+
+    for event in replay.events:
+        build_order, current_supply = handle_event(event, build_order, current_supply, player)
+
+    print_build_order(text_widgets, replay, player, build_order)
+
+    players_info_str = '\n'.join(players_info)  # Convert the list to a string
     # Print game timeline
     sys.stdout = TextRedirector(text_widgets['Game Timeline'])
     print(f"Game length (seconds): {replay.length.seconds}")
