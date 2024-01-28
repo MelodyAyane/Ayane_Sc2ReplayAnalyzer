@@ -5,6 +5,7 @@ import ttkbootstrap
 import sc2reader
 import os
 import sys
+import psutil
 from collections import defaultdict
 
 class TextRedirector(object):
@@ -82,8 +83,14 @@ def analyze_replay():
     root = tk.Tk()  # Create a standard Tk instance
 
     def close_window():
-        root.quit()
-        root.destroy()
+        # Get current process using psutil
+        parent = psutil.Process(os.getpid())
+        # Iterate over the all the running process
+        for child in parent.children(recursive=True):
+            child.terminate()  # Terminate process
+
+        root.quit()  # End the mainloop
+        root.destroy()  # Destroy the root window
         os._exit(0)  # Forcefully exit the program
 
     root.protocol("WM_DELETE_WINDOW", close_window)  # Close the window when the close button is pressed
@@ -133,60 +140,18 @@ def analyze_replay():
 
     # Print game version and map information
     print(f"Game version: {replay.release_string}")
-    # Print player info
-    sys.stdout = TextRedirector(text_widgets['Player Info'])
-    players_info = []
-    button_frame = tk.Frame(text_widgets['Player Info'])  # Create a new frame to contain the buttons
-    button_frame.pack(side=tk.BOTTOM)  # Place the frame at the bottom of the window
-    # Create a set to store the names of players that have been processed
-    processed_players = set()
 
-    for player in replay.players:
-        # Skip this player if their information has already been added
-        if player.name in processed_players:
-            continue
-
-        player_stats = {'apm': None, 'epm': None}  # Initialize player stats
-        build_order = defaultdict(lambda: {"population": 0, "units": defaultdict(int), "buildings": [],
-                                           "upgrades": []})  # A dictionary to store the build order for each time point
-        current_supply = 0  # Variable to store the current supply count
-        action_count = 0
-        effective_action_count = 0
-        last_action = None
-        for event in replay.events:
-            if isinstance(event, sc2reader.events.game.CommandEvent) and event.player == player:
-                action_count += 1
-                if last_action != event.ability_name:
-                    effective_action_count += 1
-                last_action = event.ability_name
-
-        game_length_minutes = replay.game_length.seconds / 60
-        player_stats['apm'] = action_count / game_length_minutes
-        player_stats['epm'] = effective_action_count / game_length_minutes  # Only count distinct actions
-
-        players_info.append(
-            f"\nPlayer name: {player.name}\nPlayer race: {player.play_race}\nPlayer color: {player.color}\nAverage APM: {player_stats['apm']}\nAverage EPM: {player_stats['epm']}")  # Add player color and info
-
-        # Add this player's name to the set of processed players
-        processed_players.add(player.name)
-
-    players_info_str = '\n'.join(players_info)  # Convert the list to a string
-
-    # Print the player info
-    sys.stdout = TextRedirector(text_widgets['Player Info'])
-    text_widgets['Player Info'].tag_configure("bold_large", font=('Microsoft YaHei', 14, 'bold'))
-    text_widgets['Player Info'].delete('1.0', tk.END)  # Clear the text widget before inserting new text
-    text_widgets['Player Info'].insert(tk.END, players_info_str, "bold_large")
-    # Add an entry for the 0 second time point
-    build_order[0]["units"]['SCV'] += 1
-    build_order[0]["population"] = 1
+    # Create a build_order dictionary for each player
+    build_orders = {player: defaultdict(lambda: {"population": 0, "units": defaultdict(int), "buildings": [], "upgrades": []}) for player in replay.players}
+    current_supplies = {player: 0 for player in replay.players}  # Variable to store the current supply count for each player
 
     for event in replay.events:
-        build_order, current_supply = handle_event(event, build_order, current_supply, player)
+        for player in replay.players:
+            build_orders[player], current_supplies[player] = handle_event(event, build_orders[player], current_supplies[player], player)
 
-    print_build_order(text_widgets, replay, player, build_order)
+    for player in replay.players:
+        print_build_order(text_widgets, replay, player, build_orders[player])
 
-    players_info_str = '\n'.join(players_info)  # Convert the list to a string
     # Print game timeline
     sys.stdout = TextRedirector(text_widgets['Game Timeline'])
     print(f"Game length (seconds): {replay.length.seconds}")
