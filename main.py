@@ -113,7 +113,7 @@ def analyze_replay():
     notebook.pack(fill='both', expand=True)
 
     # Create a tab for each type of information
-    info_tabs = ['Basic Info', 'Player Info', 'Build Order', 'Game Timeline', 'Game Statistics', 'Chat Messages', 'Metadata']
+    info_tabs = ['Basic Info', 'Player Info', 'Build Order', 'Game Timeline', 'Game Statistics', 'Chat Messages', 'Macro analysis']
     text_widgets = {}
     for tab in info_tabs:
         frame = ttk.Frame(notebook)
@@ -209,13 +209,30 @@ def analyze_replay():
     # Print game statistics
     sys.stdout = TextRedirector(text_widgets['Game Statistics'])
     for player in replay.players:
-        minerals_collected = 0
-        vespene_collected = 0
+        total_units = 0
+        total_killed_units = 0
+        total_destroyed_buildings = 0
+        total_unspent_resources = 0
+        total_supply_capped_time = 0
+        previous_event = None
         for event in replay.events:
-            if isinstance(event, sc2reader.events.tracker.PlayerStatsEvent) and event.pid == player.pid:
-                minerals_collected += event.minerals_collection_rate
-                vespene_collected += event.vespene_collection_rate
-        print(f"Player {player.name} collected {minerals_collected} minerals and {vespene_collected} vespene")
+            if isinstance(event, sc2reader.events.tracker.UnitBornEvent) and event.control_pid == player.pid:
+                total_units += 1
+            elif isinstance(event, sc2reader.events.tracker.UnitDiedEvent) and event.killing_player_id == player.pid:
+                if event.unit.is_building:
+                    total_destroyed_buildings += 1
+                else:
+                    total_killed_units += 1
+            elif isinstance(event, sc2reader.events.tracker.PlayerStatsEvent) and event.pid == player.pid:
+                total_unspent_resources += event.minerals_current + event.vespene_current
+                if previous_event and event.food_used == event.food_made:
+                    total_supply_capped_time += event.second - previous_event.second
+                previous_event = event
+        average_unspent_resources = int(total_unspent_resources / replay.game_length.seconds)
+        print(
+            f"Player {player.name} created {total_units} units, killed {total_killed_units} units, and destroyed {total_destroyed_buildings} buildings")
+        print(
+            f"Player {player.name} had an average of {average_unspent_resources} unspent resources and was supply capped for {total_supply_capped_time} seconds")
 
     # Print chat messages
     sys.stdout = TextRedirector(text_widgets['Chat Messages'])
@@ -224,7 +241,29 @@ def analyze_replay():
             print(f"{message.player.name}: {message.text}")
     else:
         print("No chat messages in this replay.")
-    # Print metadata
+
+    # Print macro analysis
+    sys.stdout = TextRedirector(text_widgets['Macro analysis'])
+    for player in replay.players:
+        total_units_produced = 0
+        total_buildings_produced = 0
+        total_upgrades_completed = 0
+        for event in replay.events:
+            if isinstance(event, sc2reader.events.tracker.UnitBornEvent) and event.control_pid == player.pid:
+                total_units_produced += 1
+            elif isinstance(event, sc2reader.events.tracker.UnitInitEvent) and event.control_pid == player.pid:
+                total_buildings_produced += 1
+            elif isinstance(event, sc2reader.events.tracker.UpgradeCompleteEvent) and event.pid == player.pid:
+                total_upgrades_completed += 1
+        units_produced_rate = total_units_produced / replay.game_length.seconds
+        buildings_produced_rate = total_buildings_produced / replay.game_length.seconds
+        upgrades_completed_rate = total_upgrades_completed / replay.game_length.seconds
+        print(f"Player {player.name} produced units at a rate of {units_produced_rate} per second")
+        print(f"Player {player.name} produced buildings at a rate of {buildings_produced_rate} per second")
+        print(f"Player {player.name} completed upgrades at a rate of {upgrades_completed_rate} per second")
+
+
+    # Print metadata in Basic Info tab
     sys.stdout = TextRedirector(text_widgets['Basic Info'])
     print(f"Replay created at: {replay.date}")
     print(f"Replay file size: {os.path.getsize(replay_file)} bytes")
