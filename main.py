@@ -34,16 +34,8 @@ def handle_event(event, build_order, current_supply, player):
 
     if isinstance(event, sc2reader.events.tracker.UnitBornEvent) and event.control_pid == player.pid:
         if event.second not in build_order:  # Check if this second is already in the build order
-            build_order[event.second] = {"population": 0, "units": [], "buildings": [], "upgrades": []}  # If not, initialize it
-        if event.second == 0:  # If this is the 0 second time point
-            if 'SCV' in build_order[event.second]["units"]:  # If an SCV has already been added, skip this loop
-                return build_order, current_supply
-            else:  # If no SCV has been added yet, add one and update the population count
-                build_order[event.second]["units"].append(event.unit_type_name)
-                current_supply += 1  # Increase the worker count
-                build_order[event.second]["population"] = current_supply  # Update the population count in the build order
-                return build_order, current_supply
-        build_order[event.second]["units"].append(event.unit_type_name)
+            build_order[event.second] = {"population": 0, "units": defaultdict(int), "buildings": [], "upgrades": []}  # If not, initialize it
+        build_order[event.second]["units"][event.unit_type_name] += 1
         if event.unit_type_name in ['SCV', 'Probe', 'Drone']:  # Check if the unit is a worker
             current_supply += 1  # Increase the worker count
         build_order[event.second]["population"] = current_supply  # Update the population count in the build order
@@ -71,8 +63,8 @@ def print_build_order(text_widgets, replay, player, build_order):
             text_widgets['Build Order'].insert(tk.END,
                                                f"At {second}s (Population: {build_order[second]['population']}):\n")
         unit_counts = defaultdict(int)
-        for unit in build_order[second]["units"]:
-            unit_counts[unit] += 1
+        for unit, count in build_order[second]["units"].items():
+            unit_counts[unit] += count
         for unit, count in unit_counts.items():
             if unit != 'Interceptor':  # Skip printing if the unit is 'Interceptor'
                 if count > 1:
@@ -155,7 +147,7 @@ def analyze_replay():
             continue
 
         player_stats = {'apm': None, 'epm': None}  # Initialize player stats
-        build_order = defaultdict(lambda: {"population": 0, "units": [], "buildings": [],
+        build_order = defaultdict(lambda: {"population": 0, "units": defaultdict(int), "buildings": [],
                                            "upgrades": []})  # A dictionary to store the build order for each time point
         current_supply = 0  # Variable to store the current supply count
         action_count = 0
@@ -186,7 +178,7 @@ def analyze_replay():
     text_widgets['Player Info'].delete('1.0', tk.END)  # Clear the text widget before inserting new text
     text_widgets['Player Info'].insert(tk.END, players_info_str, "bold_large")
     # Add an entry for the 0 second time point
-    build_order[0]["units"].append('SCV')
+    build_order[0]["units"]['SCV'] += 1
     build_order[0]["population"] = 1
 
     for event in replay.events:
